@@ -2,7 +2,6 @@
 
 %include "typemaps.i"
 
-
 %pythonbegin %{
 from sys import stderr, float_info
 from traceback import print_exc, print_exception
