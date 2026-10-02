@@ -1,3 +1,35 @@
+name: Build LiteCTP Wheels
+on:
+  workflow_dispatch:
+    inputs:
+      target_platform:
+        description: "Choose Linux for Debian, Windows, or both"
+        type: choice
+        required: true
+        default: linux
+        options: [linux, windows, both]
+      python_version:
+        description: "Python version on the target system"
+        type: choice
+        required: true
+        default: "3.11"
+        options: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  linux:
+    name: Build Linux wheel and verify on Debian
+    if: ${{ inputs.target_platform == 'linux' || inputs.target_platform == 'both' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      PYTHON_VERSION: ${{ inputs.python_version }}
+      CIBW_ARCHS_LINUX: x86_64
+      CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+      CIBW_ENVIRONMENT_LINUX: "API_VER=6.7.13"
       CIBW_BEFORE_BUILD_LINUX: "python -m pip install swig==4.5.0"
       CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
         LD_LIBRARY_PATH="{project}/api/6.7.13/linux"
