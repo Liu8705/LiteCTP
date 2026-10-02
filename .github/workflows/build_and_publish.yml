@@ -1,149 +1,97 @@
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
+name: Build LiteCTP Windows Wheel
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
-      api_ver:
-        description: "CTP API version (e.g. 6.7.7)"
-        required: false
-        default: "6.7.7"
-      build_ver:
-        description: "Build version override (e.g. 6.7.7.post1, leave empty to use api_ver)"
-        required: false
-        default: ""
-      publish:
-        description: "Publish to PyPI after build"
-        required: false
-        default: "false"
+      python_version:
+        description: "Select your local Python version"
         type: choice
-        options:
-          - "false"
-          - "true"
-
+        required: true
+        default: "3.11"
+        options: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: pwsh
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      api_ver: ${{ steps.vars.outputs.api_ver }}
-      build_ver: ${{ steps.vars.outputs.build_ver }}
-      publish: ${{ steps.vars.outputs.publish }}
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      API_VER: "6.7.13"
     steps:
-      - name: Compute versions
-        id: vars
+      - name: Download source
+        uses: actions/checkout@v6
+      - name: Set LiteCTP package metadata
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Tag push: strip leading 'v' for build_ver, derive api_ver by removing post suffix
-            TAG="${{ github.ref_name }}"
-            BUILD_VER="${TAG#v}"
-            API_VER=$(echo "$BUILD_VER" | sed 's/\.post[0-9]*//')
-            echo "api_ver=$API_VER" >> $GITHUB_OUTPUT
-            echo "build_ver=$BUILD_VER" >> $GITHUB_OUTPUT
-            echo "publish=true" >> $GITHUB_OUTPUT
-          else
-            API_VER="${{ github.event.inputs.api_ver }}"
-            BUILD_VER="${{ github.event.inputs.build_ver }}"
-            echo "api_ver=$API_VER" >> $GITHUB_OUTPUT
-            echo "build_ver=$BUILD_VER" >> $GITHUB_OUTPUT
-            echo "publish=${{ github.event.inputs.publish }}" >> $GITHUB_OUTPUT
-          fi
-
-  build_unix:
-    needs: setup
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+          @'
+          import os, re
+          from pathlib import Path
+          p = Path("setup.py")
+          text = p.read_text(encoding="utf-8")
+          old, new = 'name="ctp-python"', 'name="LiteCTP"'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise RuntimeError("Cannot locate the package name in setup.py.")
+          repo_url = os.environ["GITHUB_SERVER_URL"].rstrip("/") + "/" + os.environ["GITHUB_REPOSITORY"]
+          pattern = r"""(?m)^([ \t]*url[ \t]*=[ \t]*)(["'])(.*?)\2"""
+          text, count = re.subn(pattern, lambda m: m.group(1) + repr(repo_url), text, count=1)
+          if count != 1:
+              raise RuntimeError("Cannot locate the project URL in setup.py.")
+          p.write_text(text, encoding="utf-8")
+          '@ | python -
+      - name: Set up cloud build environment
+        uses: conda-incubator/setup-miniconda@v4
         with:
-          python-version: "3.11"
-
-      - name: Setup swig for macos
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install swig
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-
-      - name: Setup pip
-        run: |
-          python -m pip install --upgrade pip cibuildwheel
-
-      - name: Build wheel
-        run: python -m cibuildwheel --output-dir dist
-        env:
-          CIBW_BUILD: ${{ matrix.version }}-*
-          CIBW_SKIP: "*-win* *_i686 *-musllinux*"
-          CIBW_ARCHS_MACOS: "x86_64 arm64"
-          # Skip delocate for macOS builds
-          CIBW_REPAIR_WHEEL_COMMAND_MACOS: ""
-          CIBW_ENVIRONMENT: "API_VER=${{ needs.setup.outputs.api_ver }} BUILD_VER=${{ needs.setup.outputs.build_ver }}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ctp-python-${{ matrix.os }}-${{ matrix.version }}
-          path: ./dist/*.whl
-
-  build_win:
-    needs: setup
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: conda-incubator/setup-miniconda@v3.3.0
-        with:
-          auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
+          miniforge-version: latest
+          activate-environment: ctp-build
+          python-version: ${{ inputs.python_version }}
           channels: conda-forge
-          conda-remove-defaults: true
-
-      - name: Prepare Windows
-        if: matrix.os == 'windows-latest'
+          channel-priority: strict
+      - name: Install SWIG and libiconv
+        run: conda install -y --override-channels -c conda-forge swig libiconv
+      - name: Install Python build tools
+        run: python -m pip install --upgrade pip build delvewheel
+      - name: Build wheel
         run: |
-          conda init
-          conda install -c conda-forge libiconv
-
-      - name: Setup pip for Windows
+          if (-not (Test-Path "api/$env:API_VER/windows")) {
+            throw "CTP Windows API directory is missing."
+          }
+          python -m build --wheel
+      - name: Bundle runtime DLLs
         run: |
-          python -m pip install --upgrade pip build
-
-      - name: Build wheel for Windows
-        run: python -m build -w
-        env:
-          API_VER: ${{ needs.setup.outputs.api_ver }}
-          BUILD_VER: ${{ needs.setup.outputs.build_ver }}
-
-      - uses: actions/upload-artifact@v4
+          $wheels = @(Get-ChildItem dist/*.whl)
+          if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
+          $dllPath = Join-Path $env:CONDA_PREFIX "Library/bin"
+          python -m delvewheel repair $wheels[0].FullName --add-path $dllPath --analyze-existing --no-mangle-all --wheel-dir wheelhouse
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
         with:
-          name: ctp-python-${{ matrix.os }}-${{ matrix.python-version }}
-          path: ./dist/*.whl
-
-  publish:
-    needs: [setup, build_unix, build_win]
-    runs-on: ubuntu-latest
-    if: needs.setup.outputs.publish == 'true'
-    environment:
-      name: pypi
-      url: https://pypi.org/p/ctp-python
-    permissions:
-      id-token: write
+          name: LiteCTP-windows-py${{ inputs.python_version }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 30
+  verify:
+    name: Verify wheel in a separate Python environment
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Set up Python without the build environment
+        uses: actions/setup-python@v6
         with:
-          pattern: ctp-python-*
-          path: dist/
-          merge-multiple: true
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          python-version: ${{ inputs.python_version }}
+          architecture: x64
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: LiteCTP-windows-py${{ inputs.python_version }}
+          path: wheelhouse
+      - name: Install and import
+        run: |
+          $wheels = @(Get-ChildItem wheelhouse/*.whl)
+          if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
+          python -m pip install --no-index --no-deps $wheels[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -c "import ctp, ctp._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'import OK:', ctp.__file__)"
