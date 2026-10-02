@@ -160,7 +160,7 @@ try:
         version=BUILD_VER,
         author="Peihai Liu",
         author_email="89175494@qq.com",
-        description="""CTP for python""",
+        description="LiteCTP: Python bindings for the CTP API",
         long_description=readme,
         long_description_content_type="text/markdown",
         url="https://github.com/kenny-ecust/LiteCTP",
