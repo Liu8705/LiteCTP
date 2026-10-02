@@ -108,7 +108,7 @@ class BuildPy(build_py):
 
         # Get the build directory
         build_lib = self.get_finalized_command("build").build_lib
-        build_ctp_dir = os.path.join(build_lib, "ctp")
+        build_ctp_dir = os.path.join(build_lib, "LiteCTP")
 
         # Move SWIG-generated ctp.py from current directory to the package directory
         if os.path.exists("ctp.py"):
@@ -142,7 +142,7 @@ class BuildPy(build_py):
 
 
 CTP_EXT = Extension(
-    "ctp._ctp",
+    "LiteCTP._ctp",
     ["ctp.i"],
     # ['ctp_wrap.cpp'],
     include_dirs=INC_DIRS,
@@ -166,8 +166,8 @@ try:
         url="https://github.com/kenny-ecust/LiteCTP",
         python_requires=">=3.9",
         ext_modules=[CTP_EXT],
-        packages=["ctp"],  # Define ctp as a package
-        package_data={"ctp": package_data},
+        packages=["LiteCTP"],  # Define ctp as a package
+        package_data={"LiteCTP": package_data},
         classifiers=[
             "License :: OSI Approved :: BSD License",
             "Programming Language :: Python",
