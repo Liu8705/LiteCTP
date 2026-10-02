@@ -62,7 +62,7 @@ jobs:
           if len(wheels) != 1:
               raise RuntimeError("Expected exactly one Linux wheel.")
           subprocess.run([sys.executable, "-m", "pip", "install", "--no-index", "--no-deps", wheels[0]], check=True)
-          subprocess.run([sys.executable, "-I", "-c", "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Debian import OK:', ctp.__file__)"], check=True)
+          subprocess.run([sys.executable, "-I", "-c", "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Debian import OK:', LiteCTP.__file__)"], check=True)
           PY
       - name: Upload Linux wheel
         uses: actions/upload-artifact@v4
@@ -143,4 +143,4 @@ jobs:
           if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
           python -m pip install --no-index --no-deps $wheels[0].FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -I -c "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Windows import OK:', ctp.__file__)"
+          python -I -c "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Windows import OK:', LiteCTP.__file__)"
