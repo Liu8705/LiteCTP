@@ -6,13 +6,13 @@ on:
         description: "Choose Linux for Debian, Windows, or both"
         type: choice
         required: true
-        default: linux
+        default: both
         options: [linux, windows, both]
       python_version:
         description: "Python version on the target system"
         type: choice
         required: true
-        default: "3.11"
+        default: "3.10"
         options: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 permissions:
   contents: read
@@ -43,21 +43,8 @@ jobs:
       - name: Set up the cloud build driver
         uses: actions/setup-python@v6
         with:
+          # Driver Python only; the wheel uses the selected python_version.
           python-version: "3.12"
-      - name: Set LiteCTP package metadata
-        shell: python
-        run: |
-          import os, re
-          from pathlib import Path
-          p = Path("setup.py")
-          text = p.read_text(encoding="utf-8")
-          repo_url = os.environ["GITHUB_SERVER_URL"].rstrip("/") + "/" + os.environ["GITHUB_REPOSITORY"]
-          for key, value in (("name", "LiteCTP"), ("url", repo_url)):
-              pattern = rf"""(?m)^([ \t]*{key}[ \t]*=[ \t]*)(["'])(.*?)\2"""
-              text, count = re.subn(pattern, lambda m: m.group(1) + repr(value), text, count=1)
-              if count != 1:
-                  raise RuntimeError(f"Cannot locate {key} in setup.py.")
-          p.write_text(text, encoding="utf-8")
       - name: Install Linux wheel builder
         run: python -m pip install cibuildwheel==4.2.1
       - name: Build and check the Linux wheel
@@ -105,20 +92,6 @@ jobs:
           python-version: ${{ inputs.python_version }}
           channels: conda-forge
           channel-priority: strict
-      - name: Set LiteCTP package metadata
-        shell: python
-        run: |
-          import os, re
-          from pathlib import Path
-          p = Path("setup.py")
-          text = p.read_text(encoding="utf-8")
-          repo_url = os.environ["GITHUB_SERVER_URL"].rstrip("/") + "/" + os.environ["GITHUB_REPOSITORY"]
-          for key, value in (("name", "LiteCTP"), ("url", repo_url)):
-              pattern = rf"""(?m)^([ \t]*{key}[ \t]*=[ \t]*)(["'])(.*?)\2"""
-              text, count = re.subn(pattern, lambda m: m.group(1) + repr(value), text, count=1)
-              if count != 1:
-                  raise RuntimeError(f"Cannot locate {key} in setup.py.")
-          p.write_text(text, encoding="utf-8")
       - name: Install SWIG and libiconv
         run: conda install -y --override-channels -c conda-forge swig libiconv
       - name: Install Python build tools
@@ -133,8 +106,10 @@ jobs:
         run: |
           $wheels = @(Get-ChildItem dist/*.whl)
           if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
-          $dllPath = Join-Path $env:CONDA_PREFIX "Library/bin"
-          python -m delvewheel repair $wheels[0].FullName --add-path $dllPath --analyze-existing --no-mangle-all --wheel-dir wheelhouse
+          $apiDllPath = (Resolve-Path "api/$env:API_VER/windows").Path
+          $condaDllPath = Join-Path $env:CONDA_PREFIX "Library/bin"
+          $dllSearchPath = "$apiDllPath;$condaDllPath"
+          python -m delvewheel repair $wheels[0].FullName --add-path $dllSearchPath --analyze-existing --no-mangle-all --wheel-dir wheelhouse
       - name: Upload Windows wheel
         uses: actions/upload-artifact@v4
         with:
