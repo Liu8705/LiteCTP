@@ -1,46 +1,70 @@
-name: Build LiteCTP Windows Wheel
-on:
-  workflow_dispatch:
-    inputs:
-      python_version:
-        description: "Select your local Python version"
-        type: choice
-        required: true
-        default: "3.11"
-        options: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
-permissions:
-  contents: read
-defaults:
-  run:
-    shell: pwsh
-jobs:
-  build:
+      CIBW_BEFORE_BUILD_LINUX: "python -m pip install swig==4.5.0"
+      CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
+        LD_LIBRARY_PATH="{project}/api/6.7.13/linux"
+        auditwheel repair --plat manylinux_2_28_x86_64
+        -w "{dest_dir}" "{wheel}"
+      CIBW_TEST_COMMAND_LINUX: >-
+        python -I -c "import ctp, ctp._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Linux import OK')"
+    steps:
+      - name: Download source
+        uses: actions/checkout@v6
+      - name: Set up the cloud build driver
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Set LiteCTP package metadata
+        shell: python
+        run: |
+          import os, re
+          from pathlib import Path
+          p = Path("setup.py")
+          text = p.read_text(encoding="utf-8")
+          repo_url = os.environ["GITHUB_SERVER_URL"].rstrip("/") + "/" + os.environ["GITHUB_REPOSITORY"]
+          for key, value in (("name", "LiteCTP"), ("url", repo_url)):
+              pattern = rf"""(?m)^([ \t]*{key}[ \t]*=[ \t]*)(["'])(.*?)\2"""
+              text, count = re.subn(pattern, lambda m: m.group(1) + repr(value), text, count=1)
+              if count != 1:
+                  raise RuntimeError(f"Cannot locate {key} in setup.py.")
+          p.write_text(text, encoding="utf-8")
+      - name: Install Linux wheel builder
+        run: python -m pip install cibuildwheel==4.2.1
+      - name: Build and check the Linux wheel
+        run: |
+          test -d api/6.7.13/linux
+          python_tag="${PYTHON_VERSION//./}"
+          python -m cibuildwheel --only "cp${python_tag}-manylinux_x86_64" --output-dir wheelhouse
+      - name: Install and import in a Debian container
+        run: |
+          docker run --rm -i \
+            --volume "$PWD/wheelhouse:/wheels:ro" \
+            "python:${PYTHON_VERSION}-slim-bookworm" python - <<'PY'
+          import glob, subprocess, sys
+          wheels = glob.glob("/wheels/*.whl")
+          if len(wheels) != 1:
+              raise RuntimeError("Expected exactly one Linux wheel.")
+          subprocess.run([sys.executable, "-m", "pip", "install", "--no-index", "--no-deps", wheels[0]], check=True)
+          subprocess.run([sys.executable, "-I", "-c", "import ctp, ctp._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Debian import OK:', ctp.__file__)"], check=True)
+          PY
+      - name: Upload Linux wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiteCTP-linux-x86_64-py${{ inputs.python_version }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 30
+  windows:
+    name: Build Windows wheel
+    if: ${{ inputs.target_platform == 'windows' || inputs.target_platform == 'both' }}
     runs-on: windows-2022
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
     env:
       API_VER: "6.7.13"
     steps:
       - name: Download source
         uses: actions/checkout@v6
-      - name: Set LiteCTP package metadata
-        run: |
-          @'
-          import os, re
-          from pathlib import Path
-          p = Path("setup.py")
-          text = p.read_text(encoding="utf-8")
-          old, new = 'name="ctp-python"', 'name="LiteCTP"'
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif new not in text:
-              raise RuntimeError("Cannot locate the package name in setup.py.")
-          repo_url = os.environ["GITHUB_SERVER_URL"].rstrip("/") + "/" + os.environ["GITHUB_REPOSITORY"]
-          pattern = r"""(?m)^([ \t]*url[ \t]*=[ \t]*)(["'])(.*?)\2"""
-          text, count = re.subn(pattern, lambda m: m.group(1) + repr(repo_url), text, count=1)
-          if count != 1:
-              raise RuntimeError("Cannot locate the project URL in setup.py.")
-          p.write_text(text, encoding="utf-8")
-          '@ | python -
       - name: Set up cloud build environment
         uses: conda-incubator/setup-miniconda@v4
         with:
@@ -49,6 +73,20 @@ jobs:
           python-version: ${{ inputs.python_version }}
           channels: conda-forge
           channel-priority: strict
+      - name: Set LiteCTP package metadata
+        shell: python
+        run: |
+          import os, re
+          from pathlib import Path
+          p = Path("setup.py")
+          text = p.read_text(encoding="utf-8")
+          repo_url = os.environ["GITHUB_SERVER_URL"].rstrip("/") + "/" + os.environ["GITHUB_REPOSITORY"]
+          for key, value in (("name", "LiteCTP"), ("url", repo_url)):
+              pattern = rf"""(?m)^([ \t]*{key}[ \t]*=[ \t]*)(["'])(.*?)\2"""
+              text, count = re.subn(pattern, lambda m: m.group(1) + repr(value), text, count=1)
+              if count != 1:
+                  raise RuntimeError(f"Cannot locate {key} in setup.py.")
+          p.write_text(text, encoding="utf-8")
       - name: Install SWIG and libiconv
         run: conda install -y --override-channels -c conda-forge swig libiconv
       - name: Install Python build tools
@@ -65,18 +103,22 @@ jobs:
           if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
           $dllPath = Join-Path $env:CONDA_PREFIX "Library/bin"
           python -m delvewheel repair $wheels[0].FullName --add-path $dllPath --analyze-existing --no-mangle-all --wheel-dir wheelhouse
-      - name: Upload wheel
+      - name: Upload Windows wheel
         uses: actions/upload-artifact@v4
         with:
           name: LiteCTP-windows-py${{ inputs.python_version }}
           path: wheelhouse/*.whl
           if-no-files-found: error
           retention-days: 30
-  verify:
-    name: Verify wheel in a separate Python environment
-    needs: build
+  verify_windows:
+    name: Verify Windows wheel in a separate environment
+    needs: windows
+    if: ${{ inputs.target_platform == 'windows' || inputs.target_platform == 'both' }}
     runs-on: windows-2022
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Set up Python without the build environment
         uses: actions/setup-python@v6
@@ -94,4 +136,4 @@ jobs:
           if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
           python -m pip install --no-index --no-deps $wheels[0].FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -I -c "import ctp, ctp._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'import OK:', ctp.__file__)"
+          python -I -c "import ctp, ctp._ctp; from importlib.metadata import version; print('LiteCTP', version('LiteCTP'), 'Windows import OK:', ctp.__file__)"
