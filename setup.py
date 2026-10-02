@@ -158,12 +158,12 @@ try:
     setup(
         name="ctp-python",
         version=BUILD_VER,
-        author="Keli Hu",
-        author_email="dev@keli.hu",
+        author="Peihai Liu",
+        author_email="89175494@qq.com",
         description="""CTP for python""",
         long_description=readme,
         long_description_content_type="text/markdown",
-        url="https://github.com/keli/ctp-python",
+        url="https://github.com/kenny-ecust/LiteCTP",
         python_requires=">=3.9",
         ext_modules=[CTP_EXT],
         packages=["ctp"],  # Define ctp as a package
