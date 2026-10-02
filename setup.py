@@ -156,7 +156,7 @@ CTP_EXT = Extension(
 
 try:
     setup(
-        name="ctp-python",
+        name="LiteCTP",
         version=BUILD_VER,
         author="Peihai Liu",
         author_email="89175494@qq.com",
