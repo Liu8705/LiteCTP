@@ -4,15 +4,11 @@
 
 ## 注意事项
 
-- **本项目出于个人兴趣及分享目的，与上期所CTP官方无任何关系。本人不对使用这套库的任何后果负责。**
-- 本人生产环境使用Linux，其他平台仅编译测试通过
-- 已通过 GitHub Actions 编译并发布至 PyPI
+- **本项目
 - Linux已测试环境：Debian stable amd64
-- Mac已测试环境：macOS 15.x（M1 Mac Mini，API版本6.6.9以上；Intel 版本通过 CI 编译，未做运行测试）
 - Windows已测试环境：Windows 11 64位（API版本6.6.9以上）+ MiniConda3
 - api目录中结尾带`.c`的版本号为测评版
 - CTP返回的GBK编码字符串已经全部自动转换为UTF-8
-- 市场数据中的极大值代表无数据，为可读性起见打印整个结构体时会显示为None
 
 ## 快速安装
 
@@ -20,38 +16,14 @@
 ```
 winget install miniconda3
 ```
-
-* Windows下使用ctp前还需要安装libiconv
+* Windows使用可能还需要安装libiconv
 ```
 conda install -c conda-forge libiconv
 ```
-
-* 直接使用pip安装
-```
-pip install ctp-python
-```
-
-- 只支持6.6.9以上的CTP版本，如需使用评测版本请自行编译
-- 已编译的二进制版本支持 Python 3.9 - 3.14
-- 已编译的二进制版本支持平台：Windows amd64，Linux amd64，MacOS arm64 和 amd64
+- 只支持6.7.13的CTP版本
+- 已编译的二进制版本支持 Python 3.10
+- 已编译的二进制版本支持平台：Windows amd64，Linux amd64
 - 其他版本请自行尝试编译（前提是有对应的CTP C++链接库），具体方法见下
-
-## 测试
-
-> 打开python shell，检查是否能正常import ctp
-
-```
-$ python
-Python 3.11.3
-Type "help", "copyright", "credits" or "license" for more information.
->>> import ctp
->>>
-```
-
-> 跑一下测试（以simnow服务器为例，需要在simnow网站注册用户）
-```
-pytest -s tests/test_trader.py --front=tcp://180.168.146.187:10130 --broker=9999 --user=<investor_id> --password=<password> --app=simnow_client_test --auth=0000000000000000
-```
 
 ## 自行编译 （可选）
 
@@ -76,25 +48,6 @@ pytest -s tests/test_trader.py --front=tcp://180.168.146.187:10130 --broker=9999
    conda install -c conda-forge swig libiconv
    ```
    > 可能需要关闭并重新打开命令行
-
-#### Mac OS
-
-1. 安装Xcode和命令行工具
-   ```
-   xcode-select --install
-   ```
-   > 在弹出的窗口确认
-
-2. 安装 uv 并使用 uv 安装 Python
-   ```
-   brew install uv
-   uv python install 3.13
-   ```
-
-3. 安装swig命令（以homebrew为例）
-   ```
-   brew install swig
-   ```
 
 #### Linux
 
