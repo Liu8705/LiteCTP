@@ -163,7 +163,7 @@ try:
         description="LiteCTP: Python bindings for the CTP API",
         long_description=readme,
         long_description_content_type="text/markdown",
-        url="https://github.com/kenny-ecust/LiteCTP",
+        url="https://github.com/Liu8705/LiteCTP",
         python_requires=">=3.9",
         ext_modules=[CTP_EXT],
         packages=["LiteCTP"],  # Define ctp as a package
