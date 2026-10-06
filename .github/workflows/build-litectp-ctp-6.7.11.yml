@@ -1,0 +1,160 @@
+name: Build LiteCTP 6.7.11 Wheels
+on:
+  workflow_dispatch:
+    inputs:
+      target_platform:
+        description: "Choose Linux for Debian, Windows, or both"
+        type: choice
+        required: true
+        default: both
+        options: [linux, windows, both]
+      python_version:
+        description: "Python version on the target system"
+        type: choice
+        required: true
+        default: "3.10"
+        options: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  linux:
+    name: Build Linux wheel and verify on Debian
+    if: ${{ inputs.target_platform == 'linux' || inputs.target_platform == 'both' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      PYTHON_VERSION: ${{ inputs.python_version }}
+      CIBW_ARCHS_LINUX: x86_64
+      CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+      CIBW_ENVIRONMENT_LINUX: "API_VER=6.7.11 BUILD_VER=6.7.11"
+      CIBW_BEFORE_BUILD_LINUX: "python -m pip install swig==4.5.0"
+      CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
+        LD_LIBRARY_PATH="{project}/api/6.7.11/linux"
+        auditwheel repair --plat manylinux_2_28_x86_64
+        -w "{dest_dir}" "{wheel}"
+      CIBW_TEST_COMMAND_LINUX: >-
+        python -I -c "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; api = LiteCTP.CThostFtdcTraderApi.GetApiVersion(); assert api.split('_', 1)[0].lstrip('v') == '6.7.11', api; assert version('LiteCTP') == '6.7.11'; print('LiteCTP', version('LiteCTP'), 'Linux import OK; API:', api)"
+    steps:
+      - name: Download source
+        uses: actions/checkout@v6
+      - name: Set up the cloud build driver
+        uses: actions/setup-python@v6
+        with:
+          # Driver Python only; the wheel uses the selected python_version.
+          python-version: "3.12"
+      - name: Install Linux wheel builder
+        run: python -m pip install cibuildwheel==4.2.1
+      - name: Build and check the Linux wheel
+        run: |
+          api_dir="api/6.7.11/linux"
+          for sdk_file in ThostFtdcUserApiDataType.h ThostFtdcUserApiStruct.h ThostFtdcMdApi.h ThostFtdcTraderApi.h libthostmduserapi_se.so libthosttraderapi_se.so; do
+            if [ ! -f "$api_dir/$sdk_file" ]; then
+              echo "::error::Missing SDK file: $api_dir/$sdk_file. Add the matching Linux x86_64 CTP 6.7.11 SDK before building."
+              exit 1
+            fi
+          done
+          python_tag="${PYTHON_VERSION//./}"
+          python -m cibuildwheel --only "cp${python_tag}-manylinux_x86_64" --output-dir wheelhouse
+      - name: Install and import in a Debian container
+        run: |
+          docker run --rm -i \
+            --volume "$PWD/wheelhouse:/wheels:ro" \
+            "python:${PYTHON_VERSION}-slim-bookworm" python - <<'PY'
+          import glob, subprocess, sys
+          wheels = glob.glob("/wheels/*.whl")
+          if len(wheels) != 1:
+              raise RuntimeError("Expected exactly one Linux wheel.")
+          subprocess.run([sys.executable, "-m", "pip", "install", "--no-index", "--no-deps", wheels[0]], check=True)
+          subprocess.run([sys.executable, "-I", "-c", "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; api = LiteCTP.CThostFtdcTraderApi.GetApiVersion(); assert api.split('_', 1)[0].lstrip('v') == '6.7.11', api; assert version('LiteCTP') == '6.7.11'; print('LiteCTP', version('LiteCTP'), 'Debian import OK:', LiteCTP.__file__, 'API:', api)"], check=True)
+          PY
+      - name: Upload Linux wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiteCTP-6.7.11-linux-x86_64-py${{ inputs.python_version }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 30
+  windows:
+    name: Build Windows wheel
+    if: ${{ inputs.target_platform == 'windows' || inputs.target_platform == 'both' }}
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      API_VER: "6.7.11"
+      BUILD_VER: "6.7.11"
+    steps:
+      - name: Download source
+        uses: actions/checkout@v6
+      - name: Set up cloud build environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: ctp-build
+          python-version: ${{ inputs.python_version }}
+          channels: conda-forge
+          channel-priority: strict
+      - name: Install SWIG and libiconv
+        run: conda install -y --override-channels -c conda-forge swig libiconv
+      - name: Install Python build tools
+        run: python -m pip install --upgrade pip build delvewheel
+      - name: Build wheel
+        run: |
+          $apiDir = "api/$env:API_VER/windows"
+          $sdkFiles = @("ThostFtdcUserApiDataType.h", "ThostFtdcUserApiStruct.h", "ThostFtdcMdApi.h", "ThostFtdcTraderApi.h", "thostmduserapi_se.dll", "thostmduserapi_se.lib", "thosttraderapi_se.dll", "thosttraderapi_se.lib")
+          foreach ($sdkFile in $sdkFiles) {
+            $sdkPath = Join-Path $apiDir $sdkFile
+            if (-not (Test-Path $sdkPath -PathType Leaf)) {
+              throw "Missing SDK file: $sdkPath. Add the matching Windows x64 CTP 6.7.11 SDK before building."
+            }
+          }
+          python -m build --wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle runtime DLLs
+        run: |
+          $wheels = @(Get-ChildItem dist/*.whl)
+          if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
+          $apiDllPath = (Resolve-Path "api/$env:API_VER/windows").Path
+          $condaDllPath = Join-Path $env:CONDA_PREFIX "Library/bin"
+          $dllSearchPath = "$apiDllPath;$condaDllPath"
+          python -m delvewheel repair $wheels[0].FullName --add-path $dllSearchPath --analyze-existing --no-mangle-all --wheel-dir wheelhouse
+      - name: Upload Windows wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiteCTP-6.7.11-windows-py${{ inputs.python_version }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 30
+  verify_windows:
+    name: Verify Windows wheel in a separate environment
+    needs: windows
+    if: ${{ inputs.target_platform == 'windows' || inputs.target_platform == 'both' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Set up Python without the build environment
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python_version }}
+          architecture: x64
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: LiteCTP-6.7.11-windows-py${{ inputs.python_version }}
+          path: wheelhouse
+      - name: Install and import
+        run: |
+          $wheels = @(Get-ChildItem wheelhouse/*.whl)
+          if ($wheels.Count -ne 1) { throw "Expected exactly one wheel." }
+          python -m pip install --no-index --no-deps $wheels[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -c "import LiteCTP, LiteCTP._ctp; from importlib.metadata import version; api = LiteCTP.CThostFtdcTraderApi.GetApiVersion(); assert api.split('_', 1)[0].lstrip('v') == '6.7.11', api; assert version('LiteCTP') == '6.7.11'; print('LiteCTP', version('LiteCTP'), 'Windows import OK:', LiteCTP.__file__, 'API:', api)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
